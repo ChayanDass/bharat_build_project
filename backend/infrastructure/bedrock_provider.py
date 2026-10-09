@@ -19,16 +19,13 @@ class BedrockModelProvider(ModelProvider):
         self.model_id = model_id
         self.region_name = region_name
         self.client = None
-        if boto3:
-            self.client = boto3.client("bedrock-runtime", region_name=region_name)
+        if not boto3:
+            raise RuntimeError(
+                "The boto3 dependency is required when LLM_PROVIDER=bedrock."
+            )
+        self.client = boto3.client("bedrock-runtime", region_name=region_name)
 
     def invoke(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Any]] = None) -> Dict[str, Any]:
-        if not self.client:
-            return {
-                "text": f"[Bedrock Client Not Configured] Response for: {prompt}",
-                "tool_calls": []
-            }
-
         messages = [{"role": "user", "content": prompt}]
         body = {
             "anthropic_version": "bedrock-2023-05-31",
@@ -57,7 +54,7 @@ class BedrockModelProvider(ModelProvider):
             }
         except Exception as e:
             return {
-                "text": f"Bedrock API Error: {str(e)}",
+                "text": "",
                 "tool_calls": [],
                 "error": str(e)
             }

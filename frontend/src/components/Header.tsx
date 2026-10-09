@@ -5,7 +5,7 @@ interface HeaderProps {
   llmProvider: string;
   activeCriticalCount: number;
   onOpenArchModal: () => void;
-  onResetDemo: () => void;
+  onResetDemo?: () => void;
 }
 
 export const Header = ({
@@ -73,16 +73,17 @@ export const Header = ({
             <span>LLM: <strong style={{ color: '#0284c7' }}>{llmProvider.toUpperCase()}</strong></span>
           </div>
 
-          {/* Reset Demo Button */}
-          <button
-            className="btn-secondary"
-            onClick={onResetDemo}
-            title="Reset database to clean initial demo state (0 tasks)"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-          >
-            <RotateCcw size={14} color="#dc2626" />
-            <span>Reset Demo Data</span>
-          </button>
+          {onResetDemo && (
+            <button
+              className="btn-secondary"
+              onClick={onResetDemo}
+              title="Reset database to clean initial demo state (0 tasks)"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+            >
+              <RotateCcw size={14} color="#dc2626" />
+              <span>Reset Demo Data</span>
+            </button>
+          )}
 
           {/* Architecture Modal Button */}
           <button className="btn-secondary" onClick={onOpenArchModal} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>

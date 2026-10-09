@@ -47,7 +47,7 @@ export const ArchitectureModal = ({ isOpen, onClose }: ArchitectureModalProps) =
         </div>
 
         <p style={{ color: '#475569', fontSize: '0.85rem', marginBottom: '1.15rem', lineHeight: 1.45 }}>
-          HeatOps uses a <strong>Single-Build Zero-Rewrite Architecture</strong>. Domain logic and tool contracts remain 100% identical between local development and AWS production.
+          HeatOps keeps its domain workflow while selecting local or AWS adapters through configuration. The AWS stack and deployment script are implemented, but deployment and production data onboarding remain operator tasks.
         </p>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
@@ -74,7 +74,7 @@ export const ArchitectureModal = ({ isOpen, onClose }: ArchitectureModalProps) =
                 💾 <strong>Database:</strong> SQLite Repository
               </div>
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
-                ⏱️ <strong>Scheduler & Alerts:</strong> Local + Console Provider
+                📡 <strong>Notifications:</strong> Console or LocalStack SNS
               </div>
             </div>
           </div>
@@ -83,7 +83,7 @@ export const ArchitectureModal = ({ isOpen, onClose }: ArchitectureModalProps) =
           <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '10px', padding: '0.9rem' }}>
             <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0284c7', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               <Server size={16} />
-              AWS Production Target Stack
+              AWS Production Stack
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.8rem', color: '#0369a1' }}>
               <div style={{ background: '#ffffff', border: '1px solid #bae6fd', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
@@ -91,6 +91,9 @@ export const ArchitectureModal = ({ isOpen, onClose }: ArchitectureModalProps) =
               </div>
               <div style={{ background: '#ffffff', border: '1px solid #bae6fd', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
                 ☁️ <strong>API & Runtime:</strong> API Gateway + AWS Lambda
+              </div>
+              <div style={{ background: '#ffffff', border: '1px solid #bae6fd', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
+                🔐 <strong>Identity & Policy:</strong> Cognito + Cedar
               </div>
               <div style={{ background: '#ffffff', border: '1px solid #bae6fd', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
                 🧠 <strong>Orchestrator:</strong> Strands Agents SDK
@@ -102,16 +105,15 @@ export const ArchitectureModal = ({ isOpen, onClose }: ArchitectureModalProps) =
                 🗄️ <strong>Database:</strong> Amazon DynamoDB
               </div>
               <div style={{ background: '#ffffff', border: '1px solid #bae6fd', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
-                📡 <strong>Scheduler & Alerts:</strong> AWS EventBridge + SNS
+                📡 <strong>Notifications:</strong> Amazon SNS
               </div>
             </div>
           </div>
         </div>
 
-        {/* Contract stability notice */}
         <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '0.75rem 0.85rem', borderRadius: '8px', fontSize: '0.8rem', color: '#166534', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <CheckCircle2 size={16} color="#16a34a" />
-          <span>Zero-Rewrite Guarantee: Business logic, 8 logical tools, and domain models remain identical across environments.</span>
+          <span>Use local demo adapters without AWS credentials; run the deployment script to provision and configure the AWS path.</span>
         </div>
       </div>
     </div>

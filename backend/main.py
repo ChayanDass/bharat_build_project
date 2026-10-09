@@ -5,13 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings, container
 from backend.api.routes import router
 from data.demo.seed_data import seed_demo_data
+from backend.security.cognito_identity import CognitoIdentityMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure database is seeded if empty on startup
-    wards = container.ward_repo.list_wards()
-    if not wards:
+    if settings.SEED_DEMO_DATA and not container.ward_repo.list_wards():
         seed_demo_data()
     yield
 
@@ -23,11 +22,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS for React/Vite development & production frontend
+if settings.AUTHENTICATION_PROVIDER == "cognito":
+    app.add_middleware(CognitoIdentityMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        origin.strip()
+        for origin in settings.CORS_ALLOWED_ORIGINS.split(",")
+        if origin.strip()
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -36,6 +41,7 @@ app.include_router(router)
 
 
 @app.get("/")
+@app.get("/api/health")
 def health_check():
     return {
         "status": "healthy",

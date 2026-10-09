@@ -1,4 +1,5 @@
 .venv/
+.aws-sam/
 .env
 .env.*
 !.env.example

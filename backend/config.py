@@ -10,18 +10,31 @@ load_dotenv(override=True)
 class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LLM_PROVIDER: str = "gemini"
+    AGENT_RUNTIME: str = "strands"
     DATABASE_PROVIDER: str = "sqlite"
     SCHEDULER_PROVIDER: str = "local"
     NOTIFICATION_PROVIDER: str = "console"
     AUTHORIZATION_PROVIDER: str = "cedar"
+    AUTHENTICATION_PROVIDER: str = "demo"
+    SEED_DEMO_DATA: bool = True
 
     GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-flash-latest"
+    BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
     AWS_REGION: str = "us-east-1"
     SQLITE_DB_PATH: str = "heatops_dev.db"
+    DYNAMODB_WARDS_TABLE: str = "heatops_wards"
+    DYNAMODB_VULNERABILITIES_TABLE: str = "heatops_vulnerabilities"
+    DYNAMODB_RESOURCES_TABLE: str = "heatops_resources"
+    DYNAMODB_EVENTS_TABLE: str = "heatops_events"
+    DYNAMODB_ACTION_PLANS_TABLE: str = "heatops_action_plans"
+    DYNAMODB_TASKS_TABLE: str = "heatops_tasks"
+    DYNAMODB_ESCALATIONS_TABLE: str = "heatops_escalations"
     CEDAR_POLICY_PATH: Optional[str] = None
     SNS_TOPIC_ARN: Optional[str] = None
     LOCALSTACK_ENDPOINT_URL: str = "http://localhost:4566"
     LOCALSTACK_SNS_TOPIC_NAME: str = "heatops-notifications"
+    CORS_ALLOWED_ORIGINS: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -62,24 +75,55 @@ class Container:
                 DynamoDBActionPlanRepository, DynamoDBTaskRepository,
                 DynamoDBEscalationRepository
             )
-            self.ward_repo = DynamoDBWardRepository(region_name=self.cfg.AWS_REGION)
-            self.vulnerability_repo = DynamoDBVulnerabilityRepository(region_name=self.cfg.AWS_REGION)
-            self.resource_repo = DynamoDBResourceRepository(region_name=self.cfg.AWS_REGION)
-            self.event_repo = DynamoDBHeatEventRepository(region_name=self.cfg.AWS_REGION)
-            self.action_plan_repo = DynamoDBActionPlanRepository(region_name=self.cfg.AWS_REGION)
-            self.task_repo = DynamoDBTaskRepository(region_name=self.cfg.AWS_REGION)
-            self.escalation_repo = DynamoDBEscalationRepository(region_name=self.cfg.AWS_REGION)
+            self.ward_repo = DynamoDBWardRepository(
+                table_name=self.cfg.DYNAMODB_WARDS_TABLE, region_name=self.cfg.AWS_REGION
+            )
+            self.vulnerability_repo = DynamoDBVulnerabilityRepository(
+                table_name=self.cfg.DYNAMODB_VULNERABILITIES_TABLE, region_name=self.cfg.AWS_REGION
+            )
+            self.resource_repo = DynamoDBResourceRepository(
+                table_name=self.cfg.DYNAMODB_RESOURCES_TABLE, region_name=self.cfg.AWS_REGION
+            )
+            self.event_repo = DynamoDBHeatEventRepository(
+                table_name=self.cfg.DYNAMODB_EVENTS_TABLE, region_name=self.cfg.AWS_REGION
+            )
+            self.action_plan_repo = DynamoDBActionPlanRepository(
+                table_name=self.cfg.DYNAMODB_ACTION_PLANS_TABLE, region_name=self.cfg.AWS_REGION
+            )
+            self.task_repo = DynamoDBTaskRepository(
+                table_name=self.cfg.DYNAMODB_TASKS_TABLE, region_name=self.cfg.AWS_REGION
+            )
+            self.escalation_repo = DynamoDBEscalationRepository(
+                table_name=self.cfg.DYNAMODB_ESCALATIONS_TABLE, region_name=self.cfg.AWS_REGION
+            )
 
         # Model Provider
-        if self.cfg.LLM_PROVIDER == "gemini":
-            from backend.infrastructure.gemini_provider import GeminiModelProvider
-            self.model_provider = GeminiModelProvider(api_key=self.cfg.GEMINI_API_KEY)
-        elif self.cfg.LLM_PROVIDER == "bedrock":
-            from backend.infrastructure.bedrock_provider import BedrockModelProvider
-            self.model_provider = BedrockModelProvider(region_name=self.cfg.AWS_REGION)
+        if self.cfg.AGENT_RUNTIME == "strands":
+            from backend.infrastructure.strands_provider import StrandsModelProvider
+            self.model_provider = StrandsModelProvider(
+                provider=self.cfg.LLM_PROVIDER,
+                model_id=self.cfg.BEDROCK_MODEL_ID,
+                gemini_api_key=self.cfg.GEMINI_API_KEY,
+                gemini_model=self.cfg.GEMINI_MODEL,
+                region_name=self.cfg.AWS_REGION,
+            )
+        elif self.cfg.AGENT_RUNTIME == "legacy":
+            if self.cfg.LLM_PROVIDER == "gemini":
+                from backend.infrastructure.gemini_provider import GeminiModelProvider
+                self.model_provider = GeminiModelProvider(api_key=self.cfg.GEMINI_API_KEY)
+            elif self.cfg.LLM_PROVIDER == "bedrock":
+                from backend.infrastructure.bedrock_provider import BedrockModelProvider
+                self.model_provider = BedrockModelProvider(
+                    model_id=self.cfg.BEDROCK_MODEL_ID,
+                    region_name=self.cfg.AWS_REGION,
+                )
+            elif self.cfg.LLM_PROVIDER == "mock":
+                from backend.infrastructure.mock_provider import MockModelProvider
+                self.model_provider = MockModelProvider()
+            else:
+                raise ValueError(f"Unsupported LLM_PROVIDER: {self.cfg.LLM_PROVIDER}")
         else:
-            from backend.infrastructure.mock_provider import MockModelProvider
-            self.model_provider = MockModelProvider()
+            raise ValueError(f"Unsupported AGENT_RUNTIME: {self.cfg.AGENT_RUNTIME}")
 
         # Scheduler Provider
         if self.cfg.SCHEDULER_PROVIDER == "local":
@@ -120,6 +164,11 @@ class Container:
             )
         from backend.security.cedar_authorizer import CedarAuthorizer
         self.task_authorizer = CedarAuthorizer(self.cfg.CEDAR_POLICY_PATH)
+
+        if self.cfg.AUTHENTICATION_PROVIDER not in {"demo", "cognito"}:
+            raise ValueError(
+                f"Unsupported AUTHENTICATION_PROVIDER: {self.cfg.AUTHENTICATION_PROVIDER}"
+            )
 
 
 # Global container instance

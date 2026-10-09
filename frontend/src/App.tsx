@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import { Header } from './components/Header';
 import { DashboardGrid } from './components/DashboardGrid';
 import { EventDetailView } from './components/EventDetailView';
@@ -21,7 +22,18 @@ import {
 } from './services/api';
 import type { EventDetailResponse, Task } from './types';
 
-export function App() {
+const authMode = import.meta.env.VITE_AUTH_MODE || 'demo';
+
+type OperatorIdentity = {
+  role: 'central' | 'department';
+  department?: string;
+};
+
+export function App({ onSignOut }: { onSignOut?: () => void } = {}) {
+  const [operator, setOperator] = useState<OperatorIdentity | null>(
+    authMode === 'cognito' ? null : { role: 'central' },
+  );
+  const [identityError, setIdentityError] = useState('');
   const [health, setHealth] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [selectedWardId, setSelectedWardId] = useState<string>('ward_12');
@@ -32,18 +44,47 @@ export function App() {
   const [isArchModalOpen, setIsArchModalOpen] = useState<boolean>(false);
   const [isExecModalOpen, setIsExecModalOpen] = useState<boolean>(false);
 
-  // Load initial health & active ward events
   useEffect(() => {
-    fetchHealthCheck().then(setHealth).catch(console.error);
-    loadEvents();
+    if (authMode !== 'cognito') return;
+    let active = true;
+    fetchAuthSession()
+      .then((session) => {
+        const claims = session.tokens?.idToken?.payload;
+        if (!claims) throw new Error('No authenticated Cognito identity was found.');
+        const rawGroups = claims['cognito:groups'];
+        const groups = Array.isArray(rawGroups)
+          ? rawGroups.map(String)
+          : String(rawGroups || '').split(',').map((group) => group.trim());
+        const department = String(claims['custom:department'] || '').trim();
+        if (groups.includes('central')) {
+          if (active) setOperator({ role: 'central' });
+        } else if (groups.includes('department') && department) {
+          if (active) setOperator({ role: 'department', department });
+        } else {
+          throw new Error('This account is not assigned to a HeatOps operator group.');
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) setIdentityError(cause instanceof Error ? cause.message : 'Could not read the operator identity.');
+      });
+    return () => {
+      active = false;
+    };
   }, []);
+
+  // Load the central dashboard only for central operators; departments use their own inbox.
+  useEffect(() => {
+    if (!operator) return;
+    fetchHealthCheck().then(setHealth).catch(console.error);
+    if (operator.role === 'central') loadEvents();
+  }, [operator]);
 
   // Reload event detail and tasks when selectedWardId changes
   useEffect(() => {
-    if (selectedWardId) {
+    if (operator?.role === 'central' && selectedWardId) {
       loadWardData(selectedWardId);
     }
-  }, [selectedWardId]);
+  }, [operator, selectedWardId]);
 
   const loadEvents = async () => {
     try {
@@ -130,17 +171,49 @@ export function App() {
     return res.answer;
   };
 
+  if (authMode === 'cognito' && !operator) {
+    return (
+      <main style={{ maxWidth: '720px', margin: '4rem auto', padding: '1.5rem' }}>
+        <h1>HeatOps operator access</h1>
+        <p role={identityError ? 'alert' : undefined}>
+          {identityError || 'Loading your authenticated operator profile…'}
+        </p>
+        {identityError && <button onClick={onSignOut}>Sign out</button>}
+      </main>
+    );
+  }
+
+  if (authMode === 'cognito' && operator?.role === 'department') {
+    return (
+      <main style={{ maxWidth: '1240px', margin: '0 auto', padding: '1.25rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h1 style={{ margin: 0 }}>HeatOps — {operator.department}</h1>
+          <button className="btn-secondary" onClick={onSignOut}>Sign out</button>
+        </div>
+        <DepartmentExecutionPanel
+          departments={[operator.department || '']}
+          lockedDepartment={operator.department}
+        />
+      </main>
+    );
+  }
+
   const activeCriticalCount = events.filter((e) => e.event.severity === 'CRITICAL').length;
 
   return (
     <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '1.25rem' }}>
+      {authMode === 'cognito' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
+          <button className="btn-secondary" onClick={onSignOut}>Sign out</button>
+        </div>
+      )}
       {/* Header Bar */}
       <Header
         environment={health?.environment || 'development'}
         llmProvider={health?.llm_provider || 'gemini'}
         activeCriticalCount={activeCriticalCount}
         onOpenArchModal={() => setIsArchModalOpen(true)}
-        onResetDemo={handleResetDemo}
+        onResetDemo={authMode === 'demo' ? handleResetDemo : undefined}
       />
 
       {/* Main Ward Event Overview Grid */}
@@ -156,6 +229,7 @@ export function App() {
         loading={loadingDetail}
         onTriggerAgent={handleOpenAgentExecutionModal}
         onSimulateWeather={handleSimulateWeather}
+        allowSimulation={authMode === 'demo'}
         isTriggering={isTriggeringAgent}
       />
 
@@ -174,9 +248,11 @@ export function App() {
         />
       </div>
 
-      <DepartmentExecutionPanel
-        departments={tasks.map((task) => task.responsible_team)}
-      />
+      {authMode === 'demo' && (
+        <DepartmentExecutionPanel
+          departments={tasks.map((task) => task.responsible_team)}
+        />
+      )}
 
       {/* Agent Query Console */}
       <AgentConsole

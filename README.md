@@ -34,18 +34,18 @@ HeatOps is designed for ward-level heat-response operators and the departments t
 
 ## AWS technology used
 
-The hackathon accepts projects built locally with an AWS open-source tool or projects deployed on AWS. HeatOps takes the local **Build It** path:
+The hackathon accepts projects built locally with an AWS open-source tool or projects deployed on AWS. HeatOps uses the local **Build It** path and also includes a deployable AWS production path:
 
 | AWS technology | How HeatOps uses it |
 | --- | --- |
-| **Strands Agents SDK** | Orchestrates the response-planning agent and its tools. |
+| **Strands Agents SDK** | Runs the bounded SOP-selection agent locally with Gemini and in AWS with Bedrock. |
 | **Cedar** | Evaluates policy-based permissions for central and department task operations. |
 
-LocalStack SNS is also supported as an optional local notification integration. The default demo uses local SQLite and console notifications; no AWS account is needed to run it. This README does not claim the application is already deployed to AWS.
+LocalStack SNS is also supported as an optional local notification integration. The default demo uses Strands with Gemini, local SQLite, and console notifications; no AWS account or AWS credentials are needed to run it.
 
-## Production architecture (target design)
+## Production architecture (implemented deployment path)
 
-The following is the intended AWS-hosted architecture. The backend deployment scaffold is in [`infrastructure/template.yaml`](infrastructure/template.yaml); the complete production system—including frontend hosting, verified user authentication, and operational monitoring—still needs to be deployed and validated.
+The AWS path is implemented in [`infrastructure/template.yaml`](infrastructure/template.yaml) and [`infrastructure/deploy-aws.sh`](infrastructure/deploy-aws.sh). Running the deployment script requires an AWS account, AWS CLI/SAM credentials, and Bedrock model access; none are needed for local development. **The stack is deployable code, not a claim that HeatOps has already been deployed.**
 
 ```mermaid
 flowchart LR
@@ -56,7 +56,8 @@ flowchart LR
     Gateway["Amazon API Gateway"]
     Lambda["AWS Lambda<br/>FastAPI application"]
     Policy["Cedar authorization"]
-    Agent["Strands Agents SDK<br/>HeatOps tools + SOP planner"]
+    Agent["Strands Agents SDK<br/>bounded SOP planner"]
+    Tools["HeatOps domain tools<br/>risk · resources · task workflow"]
     Model["Amazon Bedrock"]
     Data[("Amazon DynamoDB<br/>wards · events · plans · tasks")]
     Notify["Amazon SNS<br/>department notifications"]
@@ -66,12 +67,13 @@ flowchart LR
     People --> Web
     Web --> CDN
     CDN --> Static
-    Web --> Gateway
-    Identity --> Web
-    Identity -. verified authorization .-> Gateway
-    Gateway -->|validated identity claims| Lambda
+    CDN -->|/api/*| Gateway
+    Web -->|sign in| Identity
+    Identity -->|Cognito ID token| Web
+    Gateway -->|Cognito authorizer verifies token| Lambda
     Lambda --> Policy
     Lambda --> Agent
+    Lambda --> Tools
     Agent --> Model
     Lambda <--> Data
     Lambda --> Notify
@@ -80,14 +82,40 @@ flowchart LR
 
 ### Production request flow
 
-1. Operators sign in and access the web application through CloudFront.
-2. The frontend calls the API Gateway endpoint with verified identity claims.
-3. Lambda runs the FastAPI application; Cedar evaluates whether the operator may perform the requested action.
-4. Strands gathers ward facts, applies the approved SOP menu, and uses Bedrock for AI planning.
-5. DynamoDB stores response plans and department-reported task state; SNS delivers assignment and status notifications.
-6. CloudWatch captures application logs and operational metrics.
+1. The deployment script provisions API Gateway/Lambda, Cognito, DynamoDB, SNS, a private S3 bucket, and CloudFront using AWS SAM.
+2. It builds the React app with the deployed Cognito pool/client IDs and uploads it to the private bucket; CloudFront serves the frontend and routes `/api/*` to API Gateway.
+3. Cognito signs in admin-provisioned operators. API Gateway validates the ID token; the backend derives central/department role and department from verified claims rather than trusting caller-supplied role headers.
+4. The Lambda runs the existing HeatOps workflow and uses Strands for bounded SOP selection with Bedrock. Cedar checks task permissions; application validation remains responsible for task state transitions.
+5. DynamoDB stores HeatOps records, SNS sends department assignment/status messages, and Lambda/API Gateway logs and tracing are available through CloudWatch/X-Ray.
 
-**Current versus target:** Strands, Cedar, the local FastAPI workflow, SQLite, and console notifications are used in the local prototype. A SAM template describes API Gateway, Lambda, DynamoDB, and Bedrock permissions. CloudFront/S3 hosting, Cognito-backed authentication, production SNS configuration, and end-to-end AWS deployment are target components, not represented as completed deployment.
+The production wiring is selected by settings in the SAM template; local defaults remain SQLite/Gemini/demo identity/console notifications, with Strands active in both modes. The deployment script is the AWS-only step and does not change the local run path. Production startup does **not** seed demo wards. The provisioned stack still needs real operational data supplied, a Bedrock model enabled in the selected region, Cognito operators provisioned into the correct group, and SNS subscriptions configured for the departments that should receive messages. The application publishes the department name as an SNS message attribute so subscriptions can filter notifications by recipient.
+
+### Deploy to AWS
+
+Prerequisites: AWS CLI credentials with CloudFormation/SAM, IAM, Cognito, DynamoDB, SNS, S3, and CloudFront permissions; AWS SAM CLI; Node.js/npm; and access to the selected Bedrock model.
+
+```bash
+AWS_REGION=us-east-1 ./infrastructure/deploy-aws.sh
+```
+
+The script deploys the infrastructure, builds the Cognito-authenticated frontend, uploads it, and invalidates CloudFront. Override `HEATOPS_STACK_NAME`, `HEATOPS_APPLICATION_NAME`, or `BEDROCK_MODEL_ID` as needed. After deployment, create operator accounts administratively; public self-registration is disabled. For example:
+
+```bash
+USER_POOL_ID=<HeatOpsUserPoolId stack output>
+
+aws cognito-idp admin-create-user \
+  --user-pool-id "$USER_POOL_ID" \
+  --username operator@example.org \
+  --user-attributes '[{"Name":"email","Value":"operator@example.org"},{"Name":"custom:department","Value":"Water Dept"}]'
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id "$USER_POOL_ID" \
+  --username operator@example.org \
+  --group-name department
+```
+
+For a central operator, omit the department attribute and assign the `central` group instead. Department operators need `custom:department` to match their task department exactly.
+
+This makes the production **architecture and integration paths present in code and deployable**; it does not mean the stack has already been deployed, operational data sources have been connected, or a live emergency service has been validated.
 
 ## Demo workflow
 
@@ -132,7 +160,7 @@ In another terminal:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -154,9 +182,9 @@ The app creates the topic at startup and uses LocalStack dummy credentials. No A
 
 - The agent proposes actions; it does not directly dispatch emergency services or assert that field work is complete.
 - Heat calculations are deterministic; population and resource data are only as current as the supplied data.
-- The current UI sends demo `X-HeatOps-Role` and `X-HeatOps-Department` headers. These are **not authentication** and can be forged. Production use requires verified identity claims and authorization at the API boundary.
+- In local demo mode, the UI sends `X-HeatOps-Role` and `X-HeatOps-Department` headers; these are **not authentication** and can be forged. The production path uses an API Gateway Cognito authorizer and the backend derives role/department from verified Cognito claims before Cedar evaluates task access.
 - Demo records do not represent live municipal systems. Validate operating procedures and data with relevant local authorities before real-world use.
-- AWS hosting and integrations shown in the production diagram are not yet deployed and validated end to end.
+- The AWS infrastructure and deployment script are implemented, but this repository has not been deployed to an AWS account. Production still requires operator provisioning, Bedrock model access, operational data onboarding, and end-to-end validation.
 
 ## Validation
 

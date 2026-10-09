@@ -11,7 +11,7 @@ REQUIRED_BY_SEVERITY = {
 }
 
 class LLMPlanningError(RuntimeError):
-    """Raised when Gemini cannot produce a valid operational plan."""
+    """Raised when the configured language-model provider cannot produce a valid plan."""
 
 
 def _candidate_payload(candidate_sops: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -92,7 +92,7 @@ candidate_sops:
         ),
     )
     if response.get("error"):
-        raise LLMPlanningError(f"Gemini planner failed: {response['error']}")
+        raise LLMPlanningError(f"Configured planner failed: {response['error']}")
 
     raw_text = response.get("text", "")
     try:

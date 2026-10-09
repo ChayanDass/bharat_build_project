@@ -253,7 +253,7 @@ class HeatOpsAgent:
         )
         trace(
             tool="llm_operational_planner",
-            desc="Gemini selects SOP IDs from the backend-approved candidate menu",
+            desc="Configured language model selects SOP IDs from the backend-approved candidate menu",
             input_args=f"{len(candidate_sops)} candidate SOPs, max_tasks=12",
             result_summary=(
                 f"{len(selected_sops)} validated SOPs selected: "
@@ -268,7 +268,7 @@ class HeatOpsAgent:
         ai_summary = planner_output["executive_summary"]
         trace(
             tool="llm_synthesis",
-            desc="Preparing executive summary from the validated Gemini planning response",
+            desc="Preparing executive summary from the validated planning response",
             input_args="severity, vulnerability, resource gaps, validated SOP selection",
             result_summary="AI executive summary generated with the SOP plan.",
             decision=ai_summary,

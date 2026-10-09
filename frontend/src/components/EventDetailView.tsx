@@ -6,6 +6,7 @@ interface EventDetailViewProps {
   loading: boolean;
   onTriggerAgent: () => void;
   onSimulateWeather: (scenario: string) => void;
+  allowSimulation?: boolean;
   isTriggering: boolean;
 }
 
@@ -14,6 +15,7 @@ export const EventDetailView = ({
   loading,
   onTriggerAgent,
   onSimulateWeather,
+  allowSimulation = true,
   isTriggering,
 }: EventDetailViewProps) => {
   if (loading) {
@@ -58,7 +60,7 @@ export const EventDetailView = ({
         </button>
       </div>
 
-      {isWard12 && (
+      {isWard12 && allowSimulation && (
         <div style={{
           display: 'flex',
           alignItems: 'center',

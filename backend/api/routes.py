@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
-from backend.config import container
+from backend.config import container, settings
 from backend.domain.models import TaskStatus, EscalationStatus, HeatEvent
 from backend.domain.services import TaskLifecycleService, calculate_heat_risk
 from backend.agent.heatops_agent import HeatOpsAgent
@@ -60,8 +60,23 @@ def require_task_permission(
         raise HTTPException(status_code=403, detail="Cedar policy denied this task operation.")
 
 
+def require_demo_mode() -> None:
+    if settings.ENVIRONMENT == "production" or not settings.SEED_DEMO_DATA:
+        raise HTTPException(status_code=404, detail="Demo-only endpoint is disabled.")
+
+
 @router.get("/wards")
-def list_wards():
+def list_wards(
+    actor_role: str = Header(default="central", alias="X-HeatOps-Role"),
+    actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
+):
+    require_task_permission(
+        role=actor_role,
+        action="view_ward",
+        task_id="all-wards",
+        department=actor_department,
+        task_department="",
+    )
     wards = container.ward_repo.list_wards()
     res = []
     for w in wards:
@@ -74,7 +89,17 @@ def list_wards():
 
 
 @router.get("/events")
-def list_events():
+def list_events(
+    actor_role: str = Header(default="central", alias="X-HeatOps-Role"),
+    actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
+):
+    require_task_permission(
+        role=actor_role,
+        action="view_ward",
+        task_id="all-events",
+        department=actor_department,
+        task_department="",
+    )
     events = container.event_repo.get_active_events()
     res = []
     for ev in events:
@@ -161,6 +186,7 @@ def assign_task_to_department(
     body: CentralAssignmentBody,
     actor_role: str = Header(alias="X-HeatOps-Role"),
     actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
+    actor_name: str = Header(default="Central HeatOps Operator", alias="X-HeatOps-Actor"),
 ):
     task = container.task_repo.get_task(task_id)
     if not task:
@@ -177,13 +203,13 @@ def assign_task_to_department(
         response_window = task.deadline - task.created_at
         updated_task.deadline = datetime.now(timezone.utc) + response_window
         updated_task.responsible_team = body.responsible_team
-        updated_task.assigned_by = body.assigned_by
-        updated_task.updated_by = body.assigned_by
+        updated_task.assigned_by = actor_name
+        updated_task.updated_by = actor_name
         container.task_repo.save_task(updated_task)
         container.notification_provider.send_notification(
             recipient=updated_task.responsible_team,
             message=(
-                f"New HeatOps task assigned by {body.assigned_by}: {updated_task.action} "
+                f"New HeatOps task assigned by {actor_name}: {updated_task.action} "
                 f"(priority {updated_task.priority.value}, deadline {updated_task.deadline.isoformat()})."
             ),
             topic="HEATOPS_TASK_ASSIGNMENT",
@@ -239,6 +265,7 @@ def update_department_task_status(
     body: DepartmentStatusBody,
     actor_role: str = Header(alias="X-HeatOps-Role"),
     actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
+    actor_name: str = Header(default="Department Operator", alias="X-HeatOps-Actor"),
 ):
     if body.status not in (
         TaskStatus.ACKNOWLEDGED,
@@ -266,7 +293,7 @@ def update_department_task_status(
         raise HTTPException(status_code=400, detail="A failure reason is required.")
     try:
         updated_task = TaskLifecycleService.transition_status(task, body.status)
-        updated_task.updated_by = body.updated_by
+        updated_task.updated_by = actor_name
         updated_task.failure_reason = (
             body.failure_reason.strip()
             if body.status == TaskStatus.FAILED and body.failure_reason
@@ -291,6 +318,7 @@ def retry_task_dispatch(
     task_id: str,
     actor_role: str = Header(alias="X-HeatOps-Role"),
     actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
+    actor_name: str = Header(default="Central HeatOps Operator", alias="X-HeatOps-Actor"),
 ):
     task = container.task_repo.get_task(task_id)
     if not task:
@@ -320,8 +348,8 @@ def retry_task_dispatch(
     updated_task.deadline = datetime.now(timezone.utc) + timedelta(minutes=60)
     if updated_task.escalation_status == EscalationStatus.ESCALATED:
         updated_task.escalation_status = EscalationStatus.RESOLVED
-    updated_task.assigned_by = "Central HeatOps Operator"
-    updated_task.updated_by = "Central HeatOps Operator"
+    updated_task.assigned_by = actor_name
+    updated_task.updated_by = actor_name
     container.task_repo.save_task(updated_task)
     container.notification_provider.send_notification(
         recipient=updated_task.responsible_team,
@@ -460,6 +488,7 @@ def simulate_task_overdue(
     actor_role: str = Header(alias="X-HeatOps-Role"),
     actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
 ):
+    require_demo_mode()
     task = container.task_repo.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -506,6 +535,7 @@ def simulate_weather_change(
     actor_role: str = Header(alias="X-HeatOps-Role"),
     actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
 ):
+    require_demo_mode()
     require_task_permission(
         role=actor_role,
         action="simulate_weather",
@@ -563,6 +593,7 @@ def reset_demo_data(
     actor_role: str = Header(alias="X-HeatOps-Role"),
     actor_department: Optional[str] = Header(default=None, alias="X-HeatOps-Department"),
 ):
+    require_demo_mode()
     require_task_permission(
         role=actor_role,
         action="reset_demo",

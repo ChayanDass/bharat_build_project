@@ -14,6 +14,7 @@ const DEPARTMENTS = [
 
 interface DepartmentExecutionPanelProps {
   departments: string[];
+  lockedDepartment?: string;
 }
 
 const statusLabel: Record<TaskStatus, string> = {
@@ -27,15 +28,17 @@ const statusLabel: Record<TaskStatus, string> = {
   ESCALATED: 'Escalated',
 };
 
-export const DepartmentExecutionPanel = ({ departments }: DepartmentExecutionPanelProps) => {
-  const [selectedDepartment, setSelectedDepartment] = useState(DEPARTMENTS[0]);
+export const DepartmentExecutionPanel = ({ departments, lockedDepartment }: DepartmentExecutionPanelProps) => {
+  const [selectedDepartment, setSelectedDepartment] = useState(lockedDepartment || DEPARTMENTS[0]);
   const [departmentTasks, setDepartmentTasks] = useState<Task[]>([]);
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
-  const availableDepartments = [...new Set([...DEPARTMENTS, ...departments])];
+  const availableDepartments = lockedDepartment
+    ? [lockedDepartment]
+    : [...new Set([...DEPARTMENTS, ...departments])];
 
   const refresh = async () => {
     setLoading(true);
@@ -87,23 +90,27 @@ export const DepartmentExecutionPanel = ({ departments }: DepartmentExecutionPan
       </div>
 
       <p style={{ color: '#64748b', fontSize: '0.76rem', margin: '0 0 0.85rem', lineHeight: 1.5 }}>
-        Select a department to view only its notified assignments. In this demo, departments share the interface; authenticated department accounts are not configured.
+        {lockedDepartment
+          ? 'Only tasks assigned to your authenticated department are shown here.'
+          : 'Select a department to view only its notified assignments. In demo mode, departments share this interface.'}
       </p>
 
-      <div role="tablist" aria-label="Department inbox" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
-        {availableDepartments.map((department) => (
-          <button
-            key={department}
-            role="tab"
-            aria-selected={selectedDepartment === department}
-            className={selectedDepartment === department ? 'btn-primary' : 'btn-secondary'}
-            onClick={() => setSelectedDepartment(department)}
-            style={{ fontSize: '0.74rem', padding: '0.35rem 0.65rem' }}
-          >
-            {department}
-          </button>
-        ))}
-      </div>
+      {!lockedDepartment && (
+        <div role="tablist" aria-label="Department inbox" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
+          {availableDepartments.map((department) => (
+            <button
+              key={department}
+              role="tab"
+              aria-selected={selectedDepartment === department}
+              className={selectedDepartment === department ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setSelectedDepartment(department)}
+              style={{ fontSize: '0.74rem', padding: '0.35rem 0.65rem' }}
+            >
+              {department}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && <p role="alert" style={{ color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '7px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>{error}</p>}
 

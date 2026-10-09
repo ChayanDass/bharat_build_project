@@ -1,39 +1,97 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: HeatOps — AWS Infrastructure (API Gateway, Lambda, DynamoDB, Bedrock IAM)
+Description: HeatOps production stack - API, identity, data, notifications, and web hosting.
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-5-sonnet-20241022-v2:0
+    Description: Bedrock foundation model ID enabled for this account and region.
+  ApplicationName:
+    Type: String
+    Default: heatops
+    AllowedPattern: '[a-zA-Z0-9-]+'
 
 Globals:
   Function:
-    Timeout: 30
-    MemorySize: 512
+    Timeout: 60
+    MemorySize: 1024
     Runtime: python3.12
+    Tracing: Active
     Environment:
       Variables:
         ENVIRONMENT: production
+        SEED_DEMO_DATA: 'false'
         LLM_PROVIDER: bedrock
+        AGENT_RUNTIME: strands
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
         DATABASE_PROVIDER: dynamodb
-        SCHEDULER_PROVIDER: eventbridge
         NOTIFICATION_PROVIDER: sns
+        AUTHORIZATION_PROVIDER: cedar
+        AUTHENTICATION_PROVIDER: cognito
+        CORS_ALLOWED_ORIGINS: '*'
         AWS_REGION: !Ref AWS::Region
+        DYNAMODB_WARDS_TABLE: !Ref HeatOpsWardsTable
+        DYNAMODB_VULNERABILITIES_TABLE: !Ref HeatOpsVulnerabilitiesTable
+        DYNAMODB_RESOURCES_TABLE: !Ref HeatOpsResourcesTable
+        DYNAMODB_EVENTS_TABLE: !Ref HeatOpsEventsTable
+        DYNAMODB_ACTION_PLANS_TABLE: !Ref HeatOpsActionPlansTable
+        DYNAMODB_TASKS_TABLE: !Ref HeatOpsTasksTable
+        DYNAMODB_ESCALATIONS_TABLE: !Ref HeatOpsEscalationsTable
+        SNS_TOPIC_ARN: !Ref HeatOpsNotificationsTopic
+  Api:
+    StageName: Prod
+    Auth:
+      DefaultAuthorizer: CognitoAuthorizer
+      AddDefaultAuthorizerToCorsPreflight: false
+      Authorizers:
+        CognitoAuthorizer:
+          UserPoolArn: !GetAtt HeatOpsUserPool.Arn
+          Identity:
+            Header: Authorization
+    Cors:
+      AllowMethods: "'GET,POST,OPTIONS'"
+      AllowHeaders: "'Authorization,Content-Type,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+      AllowOrigin: "'*'"
 
 Resources:
-  # ===================================================================
-  # API GATEWAY & LAMBDA
-  # ===================================================================
   HeatOpsApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../
       Handler: backend.api.lambda_handler.handler
-      Description: HeatOps Command Centre API & Agent Lambda Handler
+      Description: HeatOps API and bounded response-planning agent.
       Policies:
-        - AmazonDynamoDBFullAccess
         - Statement:
-            - Effect: Allow
+            - Sid: ReadWriteHeatOpsTables
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchWriteItem
+              Resource:
+                - !GetAtt HeatOpsWardsTable.Arn
+                - !GetAtt HeatOpsVulnerabilitiesTable.Arn
+                - !GetAtt HeatOpsResourcesTable.Arn
+                - !Sub '${HeatOpsResourcesTable.Arn}/index/*'
+                - !GetAtt HeatOpsEventsTable.Arn
+                - !GetAtt HeatOpsActionPlansTable.Arn
+                - !GetAtt HeatOpsTasksTable.Arn
+                - !GetAtt HeatOpsEscalationsTable.Arn
+            - Sid: PublishHeatOpsNotifications
+              Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref HeatOpsNotificationsTopic
+            - Sid: InvokeConfiguredBedrockModel
+              Effect: Allow
               Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
-              Resource: "*"
+              Resource: !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockModelId}'
       Events:
         ApiGatewayProxy:
           Type: Api
@@ -46,14 +104,20 @@ Resources:
             Path: /
             Method: ANY
 
-  # ===================================================================
-  # DYNAMODB TABLES
-  # ===================================================================
+  HeatOpsApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: HeatOpsApiFunction
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${HeatOpsApiFunction}'
+      RetentionInDays: 30
+
   HeatOpsWardsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_wards
+      TableName: !Sub '${ApplicationName}_wards'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: ward_id
           AttributeType: S
@@ -64,8 +128,10 @@ Resources:
   HeatOpsVulnerabilitiesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_vulnerabilities
+      TableName: !Sub '${ApplicationName}_vulnerabilities'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: ward_id
           AttributeType: S
@@ -76,8 +142,10 @@ Resources:
   HeatOpsResourcesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_resources
+      TableName: !Sub '${ApplicationName}_resources'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: resource_id
           AttributeType: S
@@ -97,8 +165,10 @@ Resources:
   HeatOpsEventsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_events
+      TableName: !Sub '${ApplicationName}_events'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: event_id
           AttributeType: S
@@ -109,8 +179,10 @@ Resources:
   HeatOpsActionPlansTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_action_plans
+      TableName: !Sub '${ApplicationName}_action_plans'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: plan_id
           AttributeType: S
@@ -121,8 +193,10 @@ Resources:
   HeatOpsTasksTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_tasks
+      TableName: !Sub '${ApplicationName}_tasks'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: task_id
           AttributeType: S
@@ -133,8 +207,10 @@ Resources:
   HeatOpsEscalationsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: heatops_escalations
+      TableName: !Sub '${ApplicationName}_escalations'
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: escalation_id
           AttributeType: S
@@ -142,7 +218,210 @@ Resources:
         - AttributeName: escalation_id
           KeyType: HASH
 
+  HeatOpsNotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ApplicationName}-department-notifications'
+
+  HeatOpsUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${ApplicationName}-operators'
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      Schema:
+        - Name: department
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+
+  HeatOpsUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub '${ApplicationName}-web'
+      UserPoolId: !Ref HeatOpsUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      ReadAttributes:
+        - email
+        - custom:department
+      WriteAttributes:
+        - email
+
+  HeatOpsCentralOperatorsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: central
+      UserPoolId: !Ref HeatOpsUserPool
+      Description: Central HeatOps response coordinators.
+
+  HeatOpsDepartmentOperatorsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: department
+      UserPoolId: !Ref HeatOpsUserPool
+      Description: Department operators with a custom:department attribute.
+
+  HeatOpsWebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  HeatOpsCloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ApplicationName}-web-oac'
+        Description: Restrict access to the HeatOps frontend bucket.
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  HeatOpsApiCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${ApplicationName}-api-no-cache'
+        MinTTL: 0
+        DefaultTTL: 0
+        MaxTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: false
+          EnableAcceptEncodingBrotli: false
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - Authorization
+              - Content-Type
+              - Origin
+              - X-HeatOps-Role
+              - X-HeatOps-Department
+              - X-HeatOps-Actor
+              - Access-Control-Request-Headers
+              - Access-Control-Request-Method
+          QueryStringsConfig:
+            QueryStringBehavior: all
+
+  HeatOpsCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: HeatOps web application and authenticated API.
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: HeatOpsWebOrigin
+            DomainName: !GetAtt HeatOpsWebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref HeatOpsCloudFrontOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: HeatOpsApiOrigin
+            DomainName: !Sub '${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com'
+            OriginPath: !Sub '/${ServerlessRestApiProdStage}'
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: HeatOpsWebOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: HeatOpsApiOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+            CachedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: !Ref HeatOpsApiCachePolicy
+            Compress: true
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+
+  HeatOpsWebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref HeatOpsWebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${HeatOpsWebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${HeatOpsCloudFrontDistribution}'
+
 Outputs:
   HeatOpsApiEndpoint:
-    Description: API Gateway endpoint URL for HeatOps Production Backend
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Description: API Gateway endpoint (also routed through CloudFront at /api).
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
+  HeatOpsWebUrl:
+    Description: CloudFront URL for the application.
+    Value: !Sub 'https://${HeatOpsCloudFrontDistribution.DomainName}'
+  HeatOpsWebBucketName:
+    Description: Private S3 bucket used as CloudFront origin.
+    Value: !Ref HeatOpsWebBucket
+  HeatOpsCloudFrontDistributionId:
+    Description: Distribution to invalidate after a frontend deployment.
+    Value: !Ref HeatOpsCloudFrontDistribution
+  HeatOpsUserPoolId:
+    Description: Cognito user pool ID for frontend sign-in.
+    Value: !Ref HeatOpsUserPool
+  HeatOpsUserPoolClientId:
+    Description: Cognito public app client ID for frontend sign-in.
+    Value: !Ref HeatOpsUserPoolClient
+  HeatOpsNotificationsTopicArn:
+    Description: SNS topic for department assignment/status notifications.
+    Value: !Ref HeatOpsNotificationsTopic

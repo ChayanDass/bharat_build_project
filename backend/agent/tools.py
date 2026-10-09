@@ -28,16 +28,10 @@ def get_weather(location_or_ward_id: str) -> Dict[str, Any]:
             "forecast": f"High temperature event continuing for {latest.duration} hours with humidity {latest.humidity}%."
         }
 
-    # Default fallback for unseeded locations
-    return {
-        "ward_id": location_or_ward_id,
-        "temperature": 44.0,
-        "humidity": 58.0,
-        "heat_index": 52.0,
-        "severity": "CRITICAL",
-        "duration_hours": 4,
-        "forecast": "Severe heatwave conditions detected."
-    }
+    raise LookupError(
+        f"No heat event data is available for ward '{location_or_ward_id}'. "
+        "Load a current heat event before generating a response plan."
+    )
 
 
 def calculate_heat_risk(temperature: float, humidity: float, duration_hours: int = 4) -> Dict[str, Any]:
@@ -64,9 +58,10 @@ def get_vulnerability(ward_id: str) -> Dict[str, Any]:
     profile = container.vulnerability_repo.get_vulnerability(ward_id)
     ward = container.ward_repo.get_ward(ward_id)
     if not profile:
-        return {
-            "error": f"No vulnerability profile found for ward '{ward_id}'"
-        }
+        raise LookupError(
+            f"No vulnerability profile is available for ward '{ward_id}'. "
+            "Load a vulnerability profile before generating a response plan."
+        )
     return {
         "ward_id": ward_id,
         "ward_name": ward.name if ward else ward_id,
