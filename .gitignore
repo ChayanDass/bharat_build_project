@@ -1,11 +1,28 @@
-# Local environment files
+.venv/
 .env
 .env.*
 !.env.example
-
-# Logs
-*.log
-
-# Operating system files
+__pycache__/
+*.pyc
 .DS_Store
 Thumbs.db
+*.log
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+dist/
+dist-ssr/
+.vscode/
+.idea/
+*.local
+
+# Local databases and runtime artifacts
+heatops_dev.db
+*.db
+*.db-shm
+*.db-wal
+
+# Internal implementation reference; not part of the public submission
+HeatOps_Master_Spec_FINAL.md
