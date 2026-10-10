@@ -152,6 +152,8 @@ python3 -m venv .venv
 PYTHONPATH=. .venv/bin/python backend/main.py
 ```
 
+Transient Gemini overload and rate-limit errors are retried up to three attempts by default, with a short exponential delay. Configure `GEMINI_RETRY_ATTEMPTS` and `GEMINI_RETRY_DELAY_SECONDS` in `.env` if needed. If the provider remains unavailable, planning still reports an explicit error; HeatOps does not create a substitute plan.
+
 The API is available at `http://localhost:8000`; interactive API documentation is at `http://localhost:8000/docs`.
 
 ### 2. Start the frontend

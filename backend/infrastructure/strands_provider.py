@@ -1,3 +1,5 @@
+import re
+import time
 from typing import Any, Dict, List, Optional
 
 from backend.domain.interfaces import ModelProvider
@@ -13,12 +15,39 @@ class StrandsModelProvider(ModelProvider):
         gemini_api_key: Optional[str],
         gemini_model: str,
         region_name: str,
+        gemini_retry_attempts: int = 3,
+        gemini_retry_delay_seconds: float = 1.0,
     ):
         self.provider = provider
         self.model_id = model_id
         self.gemini_api_key = gemini_api_key
         self.gemini_model = gemini_model
         self.region_name = region_name
+        self.gemini_retry_attempts = max(1, gemini_retry_attempts)
+        self.gemini_retry_delay_seconds = max(0.0, gemini_retry_delay_seconds)
+
+    @staticmethod
+    def _is_transient_gemini_error(error: Exception) -> bool:
+        status = getattr(error, "status", None)
+        status_code = getattr(status, "code", status)
+        if isinstance(status_code, int) and (
+            status_code == 429 or 500 <= status_code <= 599
+        ):
+            return True
+
+        message = str(error)
+        return bool(
+            re.search(r"\b(429|500|502|503|504)\b", message)
+            or any(
+                marker in message.upper()
+                for marker in (
+                    "RESOURCE_EXHAUSTED",
+                    "UNAVAILABLE",
+                    "INTERNAL",
+                    "DEADLINE_EXCEEDED",
+                )
+            )
+        )
 
     def invoke(
         self,
@@ -59,17 +88,30 @@ class StrandsModelProvider(ModelProvider):
                 "and its selected model-provider extra."
             ) from exc
 
-        agent = Agent(
-            model=model,
-            system_prompt=system_prompt,
-            tools=tools or [],
-        )
-        try:
-            result = agent(prompt)
-        except Exception as exc:
-            return {
-                "text": "",
-                "tool_calls": [],
-                "error": f"Strands {self.provider} invocation failed: {exc}",
-            }
-        return {"text": str(result), "tool_calls": []}
+        for attempt in range(self.gemini_retry_attempts if self.provider == "gemini" else 1):
+            try:
+                agent = Agent(
+                    model=model,
+                    system_prompt=system_prompt,
+                    tools=tools or [],
+                )
+                result = agent(prompt)
+                return {"text": str(result), "tool_calls": []}
+            except Exception as exc:
+                if (
+                    self.provider != "gemini"
+                    or not self._is_transient_gemini_error(exc)
+                    or attempt + 1 >= self.gemini_retry_attempts
+                ):
+                    return {
+                        "text": "",
+                        "tool_calls": [],
+                        "error": f"Strands {self.provider} invocation failed: {exc}",
+                    }
+                time.sleep(self.gemini_retry_delay_seconds * (2 ** attempt))
+
+        return {
+            "text": "",
+            "tool_calls": [],
+            "error": f"Strands {self.provider} invocation failed after retries.",
+        }

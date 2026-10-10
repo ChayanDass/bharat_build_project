@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-flash-latest"
+    GEMINI_RETRY_ATTEMPTS: int = 3
+    GEMINI_RETRY_DELAY_SECONDS: float = 1.0
     BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
     AWS_REGION: str = "us-east-1"
     SQLITE_DB_PATH: str = "heatops_dev.db"
@@ -105,6 +107,8 @@ class Container:
                 model_id=self.cfg.BEDROCK_MODEL_ID,
                 gemini_api_key=self.cfg.GEMINI_API_KEY,
                 gemini_model=self.cfg.GEMINI_MODEL,
+                gemini_retry_attempts=self.cfg.GEMINI_RETRY_ATTEMPTS,
+                gemini_retry_delay_seconds=self.cfg.GEMINI_RETRY_DELAY_SECONDS,
                 region_name=self.cfg.AWS_REGION,
             )
         elif self.cfg.AGENT_RUNTIME == "legacy":
